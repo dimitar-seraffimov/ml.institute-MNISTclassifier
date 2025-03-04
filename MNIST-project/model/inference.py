@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 from PIL import Image
 import torchvision.transforms as transforms
-from model import MNISTClassifier
+from model.model import MNISTClassifier
 
 class MNISTPredictor:
     """
@@ -12,7 +12,7 @@ class MNISTPredictor:
     This class handles loading the trained model and preprocessing input images
     to make them compatible with the model's expected input format.
     """
-    def __init__(self, model_path='model/mnist_classifier.pth'):
+    def __init__(self, model_path='saved_models/mnist_classifier.pth'):
         """
         Initialise the predictor with a trained model.
         
@@ -87,11 +87,12 @@ class MNISTPredictor:
         with torch.no_grad():
             output = self.model(tensor)
             
-            # get probabilities
-            probabilities = F.softmax(output, dim=1)[0]
+            # the model outputs log probabilities
+            # need to use exp to get actual probabilities
+            probabilities = torch.exp(output[0])
             
             # get the predicted digit and its probability
-            predicted_digit = output.argmax(dim=1, keepdim=True).item()
+            predicted_digit = probabilities.argmax().item()
             confidence = probabilities[predicted_digit].item()
             
             # convert probabilities to list

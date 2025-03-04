@@ -129,7 +129,7 @@ def plot_training_history(history):
     plt.savefig('model/plots/training_history.png')
     plt.close()
 
-def save_model(model, path='model/mnist_classifier.pth'):
+def save_model(model, path='saved_models/mnist_classifier.pth'):
     """
     Save the trained model.
     

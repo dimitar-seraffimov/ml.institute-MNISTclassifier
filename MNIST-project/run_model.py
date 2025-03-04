@@ -22,8 +22,8 @@ def parse_args():
                         help='Learning rate (default: 0.01)')
     parser.add_argument('--momentum', type=float, default=0.5,
                         help='SGD momentum (default: 0.5)')
-    parser.add_argument('--model-path', type=str, default='model/mnist_classifier.pth',
-                        help='Path to save/load the model (default: model/mnist_classifier.pth)')
+    parser.add_argument('--model-path', type=str, default='saved_models/mnist_classifier.pth',
+                        help='Path to save/load the model (default: saved_models/mnist_classifier.pth)')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='Disable CUDA training')
     parser.add_argument('--seed', type=int, default=42,
