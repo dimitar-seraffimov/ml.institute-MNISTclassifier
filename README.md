@@ -1,6 +1,22 @@
 # MNIST Classifier Model
 
-PyTorch implementation of a Convolutional Neural Network (CNN) for MNIST digit classification
+PyTorch implementation of a Convolutional Neural Network (CNN) for MNIST digit classification.
+
+Run the script `run_model.py` in the parent directory, it trains the model and generates a visualisation for the prediction of 5 numbers.
+
+Example visualisation (can be found in /results folder after each generation):
+![test_predictions](results/test_predictions.png)
+
+```bash
+# Train the model
+python run_model.py --mode train
+
+# Test the model
+python run_model.py --mode test --test-samples 8
+
+# Both train and test
+python run_model.py --mode both
+```
 
 ## Files
 
