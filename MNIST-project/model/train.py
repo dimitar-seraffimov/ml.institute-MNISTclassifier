@@ -2,16 +2,10 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
-import numpy as np
-from model import MNISTClassifier
 
-# set random seed for reproducibility
-torch.manual_seed(42)
 
-def train_model(model, train_loader, test_loader, epochs=10, lr=0.01, momentum=0.5):
+def train_model(model, train_loader, test_loader, epochs=10, lr=0.001):
     """
     Train the MNIST classifier model.
     
@@ -21,14 +15,17 @@ def train_model(model, train_loader, test_loader, epochs=10, lr=0.01, momentum=0
         test_loader: DataLoader for test data
         epochs: number of training epochs
         lr: learning rate
-        momentum: momentum for SGD optimiser
     
     Returns:
         Trained model and training history
     """
+
+    print(f"--- train_model function in train.py...")
+
+
     # define loss function and optimiser
     criterion = nn.CrossEntropyLoss()
-    optimiser = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+    optimiser = optim.Adam(model.parameters(), lr=lr)
     
     # training history
     train_losses = []
@@ -37,10 +34,12 @@ def train_model(model, train_loader, test_loader, epochs=10, lr=0.01, momentum=0
     
     # training loop
     for epoch in range(1, epochs + 1):
-        # training phase
+        # put the model in training mode!
         model.train()
         train_loss = 0
+
         for batch_idx, (data, target) in enumerate(train_loader):
+            # data and target are set on the correct device in the run_model.py file
             # zero the parameter gradients
             optimiser.zero_grad()
             
@@ -48,30 +47,31 @@ def train_model(model, train_loader, test_loader, epochs=10, lr=0.01, momentum=0
             output = model(data)
             
             # calculate loss
-            loss = criterion(output, target)
+            loss_function = criterion(output, target)
             
-            # backward pass and optimise
-            loss.backward()
+            # backward pass propogate the loss and optimise the model
+            loss_function.backward()
             optimiser.step()
             
             # accumulate loss
-            train_loss += loss.item()
+            train_loss += loss_function.item()
             
             # print progress
-            if batch_idx % 100 == 0:
+            if batch_idx % 20 == 0:
                 print(f'Train Epoch: {epoch} [{batch_idx * len(data)}/{len(train_loader.dataset)} '
-                      f'({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss.item():.6f}')
+                      f'({100. * batch_idx / len(train_loader):.0f}%)]\tLoss: {loss_function.item():.6f}')
         
         # average training loss for this epoch
         train_loss /= len(train_loader)
         train_losses.append(train_loss)
         
-        # evaluation phase
+        # evaluation phase for each epoch
         model.eval()
         test_loss = 0
         correct = 0
+
         with torch.no_grad():
-            for data, target in test_loader:
+            for data, target in test_loader:                
                 # forward pass
                 output = model(data)
                 
@@ -91,8 +91,8 @@ def train_model(model, train_loader, test_loader, epochs=10, lr=0.01, momentum=0
         accuracy = 100. * correct / len(test_loader.dataset)
         test_accuracies.append(accuracy)
         
-        print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, '
-              f'Test Accuracy: {accuracy:.2f}%')
+        print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.0f}, '
+              f'Test Accuracy: {accuracy:.0f}%')
     
     return model, {'train_losses': train_losses, 
                   'test_losses': test_losses, 
@@ -142,40 +142,4 @@ def save_model(model, path='saved_models/mnist_classifier.pth'):
     
     # save the model
     torch.save(model.state_dict(), path)
-    print(f'Model saved to {path}')
-
-def main():
-    """
-    Main function to train and save the MNIST classifier model.
-    """
-    # define transformations for the MNIST dataset
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))  # MNIST mean and std
-    ])
-    
-    # load MNIST training dataset
-    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    
-    # load MNIST test dataset
-    test_dataset = datasets.MNIST('./data', train=False, transform=transform)
-    test_loader = DataLoader(test_dataset, batch_size=1000)
-    
-    # create model
-    model = MNISTClassifier()
-    
-    # train model
-    print("Starting model training...")
-    trained_model, history = train_model(model, train_loader, test_loader, epochs=10)
-    
-    # plot training history
-    plot_training_history(history)
-    
-    # save model
-    save_model(trained_model)
-    
-    print("Training completed successfully!")
-
-if __name__ == "__main__":
-    main() 
+    print(f'Model saved to {path}') 

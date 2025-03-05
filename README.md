@@ -6,13 +6,13 @@ Project created as part of my interview preparation for the 'ml.institute' 6-wee
 
 I will approach the project by separating it into different components and combining code on each step:
 
-1. **PyTorch Model**: build a neural network trained on the MNIST dataset to recognise handwritten digits
+1. **PyTorch Model**: building a convolutional neural network trained on the MNIST dataset to recognise handwritten digits
 2. **Interactive Web Interface**: create Streamlit application allowing users to draw digits and get predictions
 3. **Database Logging**: store log predictions and user feedback in a PostgreSQL database
 4. **Containerisation**: setup Docker for all components
 5. **Deployment**: create a step-by-step instructions for server setup and I will try to deploy on a self-managed server
 
-## Desired Project Structure
+## Possible Project Structure
 
 ```
 ├── app/                    # Streamlit web application
