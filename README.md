@@ -1,68 +1,99 @@
-# MNIST Digit Classifier
+# MNIST Classifier Model
 
-Project created as part of my interview preparation for the 'ml.institute' 6-week programme starting on the 31st of March 2025.
+PyTorch implementation of a Convolutional Neural Network (CNN) for MNIST digit classification
 
-## Project Overview
+## Files
 
-I will approach the project by separating it into different components and combining code on each step:
+- `model.py`: defines the CNN architecture
+- `train.py`: contains the training loop and evaluation functions
+- `inference.py`: provides utilities for making predictions with the trained model
+- `mnist_classifier.ipynb`: Jupyter notebook demonstrating the model
 
-1. **PyTorch Model**: building a convolutional neural network trained on the MNIST dataset to recognise handwritten digits
-2. **Interactive Web Interface**: create Streamlit application allowing users to draw digits and get predictions
-3. **Database Logging**: store log predictions and user feedback in a PostgreSQL database
-4. **Containerisation**: setup Docker for all components
-5. **Deployment**: create a step-by-step instructions for server setup and I will try to deploy on a self-managed server
+## Model Architecture
 
-## Possible Project Structure
+The model is a Convolutional Neural Network (CNN) with the following architecture:
 
+1. **Convolutional Layers**:
+
+   - First layer: 1 input channel (grayscale) → 10 output channels, 5x5 kernel
+   - Second layer: 10 input channels → 20 output channels, 5x5 kernel
+   - Each followed by ReLU activation and 2x2 max pooling
+
+2. **Fully Connected Layers**:
+
+   - First layer: 320 input features → 50 output features
+   - Second layer: 50 input features → 10 output features (one for each digit)
+
+3. **Regularization**:
+   - Dropout after second convolutional layer
+   - Dropout after first fully connected layer
+
+## Training Process
+
+The training process in `train.py` includes:
+
+1. Using pre-loaded MNIST dataset via DataLoaders
+2. Training the model using Adam optimizer with Cross Entropy Loss
+3. Evaluating the model on a test set after each epoch
+4. Tracking and plotting training history (losses and accuracy)
+5. Saving the trained model
+
+## Inference
+
+The `inference.py` file provides the `MNISTPredictor` class for making predictions:
+
+1. Loads the trained model
+2. Preprocesses input images (resize, normalize)
+3. Handles different input formats (PIL Image, numpy array, or PyTorch tensor)
+4. Makes predictions and returns:
+   - Predicted digit (0-9)
+   - Confidence score
+   - Probabilities for all digits
+
+## Using the Model
+
+You can use the model in several ways:
+
+### 1. Using run_model.py
+
+The main script `run_model.py` in the parent directory provides a command-line interface:
+
+```bash
+# Train the model
+python run_model.py --mode train
+
+# Test the model
+python run_model.py --mode test --test-samples 8
+
+# Both train and test
+python run_model.py --mode both
 ```
-├── app/                    # Streamlit web application
-│   ├── app.py              # Main Streamlit application
-│   └── utils.py            # Utility functions for the app
-├── database/               # Database setup and utilities
-│   ├── init.sql            # SQL initialisation script
-│   └── db_utils.py         # Database utility functions
-├── docker/                 # Docker configuration
-│   ├── Dockerfile.model    # Dockerfile for the model service
-│   ├── Dockerfile.app      # Dockerfile for the Streamlit app
-│   └── Dockerfile.db       # Dockerfile for PostgreSQL
-├── model/                  # PyTorch model training and inference
-│   ├── train.py            # Script to train the model
-│   ├── model.py            # Model architecture definition
-│   └── inference.py        # Inference utilities
-├── docker-compose.yml      # Docker Compose configuration
-├── requirements.txt        # Python dependencies
-└── README.md               # Project documentation
-```
 
-## Setup and Installation
+Command line options:
 
-### Local Development and Setup
+- `--mode`: train, test, or both
+- `--epochs`: number of training epochs
+- `--batch-size`: batch size for training
+- `--learning-rate`: learning rate for optimizer
+- `--model-path`: path to save/load the model
+- `--no-cuda`: disable CUDA training
+- `--test-samples`: number of test samples to visualize
 
-1. Clone the repository:
+### 2. Using the Jupyter Notebook
 
-   ```bash
-   git clone https://github.com/yourusername/ml.institute-MNISTclassifier.git
-   cd ml.institute-MNISTclassifier
-   cd MNIST-project
-   ```
+The `mnist_classifier.ipynb` notebook provides an interactive demonstration of the model:
 
-2. Create a virtual environment and install dependencies:
+1. Model definition and training
+2. Visualization of training history
+3. Testing on sample images
+4. Visualization of prediction probabilities
 
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
+## Requirements
 
-3. Train the model:
+- PyTorch
+- torchvision
+- NumPy
+- Matplotlib
+- PIL (Pillow)
 
-   ```bash
-   python model/train.py
-   ```
-
-4. Run the Streamlit app:
-   ```bash
-   streamlit run app/app.py
-   ```
-
-
+These dependencies are listed in the `requirements.txt` file in the parent directory.
