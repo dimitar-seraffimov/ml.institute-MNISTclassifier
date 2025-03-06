@@ -2,7 +2,6 @@ import os
 import sys
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import streamlit as st
 from PIL import Image
@@ -14,7 +13,11 @@ import datetime
 from dotenv import load_dotenv
 from streamlit_drawable_canvas import st_canvas
 import pandas as pd
-import torchvision.transforms as transforms
+import json
+
+# Add parent directory to path to import from model
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from model.inference import MNISTPredictor
 
 # Load environment variables from .env file
 load_dotenv()
@@ -35,98 +38,19 @@ DB_PARAMS = {
     'password': 'master'
 }
 
-# Uncomment to use environment variables
-# DB_PARAMS = {
-#     'host': os.getenv('POSTGRES_HOST', 'localhost'),
-#     'port': os.getenv('POSTGRES_PORT', '5432'),
-#     'database': os.getenv('POSTGRES_DB', 'mnist_db'),
-#     'user': os.getenv('POSTGRES_USER', 'postgres'),
-#     'password': os.getenv('POSTGRES_PASSWORD', 'master')
-# }
-
 # Model path
-MODEL_PATH = os.getenv('MODEL_PATH', 'mnist_classifier.pth')
-
-# Define the model architecture
-class MNISTClassifier(nn.Module):
-    def __init__(self):
-        super(MNISTClassifier, self).__init__()
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-        self.conv2_drop = nn.Dropout(0.25)
-        self.fc1 = nn.Linear(320, 50)
-        self.fc2 = nn.Linear(50, 10)
-
-    def forward(self, x):
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        x = x.view(-1, 320)
-        x = F.relu(self.fc1(x))
-        x = F.dropout(x, training=self.training)
-        x = self.fc2(x)
-        return F.log_softmax(x, dim=1)
+MODEL_PATH = os.getenv('MODEL_PATH', 'saved_models/mnist_classifier.pth')
 
 @st.cache_resource
-def load_model():
-    """Load the trained MNIST model"""
+def load_predictor():
+    """Load the MNIST predictor"""
     try:
-        # Initialize model
-        model = MNISTClassifier()
-        
-        # Load model weights
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-        
-        # Set model to evaluation mode
-        model.to(device)
-        model.eval()
-        
-        return model, device
+        # Initialize predictor with model path
+        predictor = MNISTPredictor(MODEL_PATH)
+        return predictor
     except Exception as e:
         st.error(f"Error loading model: {e}")
-        return None, None
-
-def preprocess_image(image):
-    """Preprocess image for model input"""
-    # Define transformations
-    transform = transforms.Compose([
-        transforms.Resize((28, 28)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-    
-    # Apply transformations
-    tensor = transform(image)
-    
-    # Add batch dimension
-    tensor = tensor.unsqueeze(0)
-    
-    return tensor
-
-def predict(model, device, image):
-    """Make prediction on an image"""
-    # Preprocess image
-    tensor = preprocess_image(image)
-    
-    # Move tensor to device
-    tensor = tensor.to(device)
-    
-    # Make prediction
-    with torch.no_grad():
-        outputs = model(tensor)
-        
-        # Convert log softmax to probabilities
-        probs = torch.exp(outputs)
-        
-        # Get predicted class
-        _, predicted = torch.max(outputs.data, 1)
-        
-        # Get predicted digit and confidence
-        predicted_digit = predicted.item()
-        probabilities = probs[0].cpu().numpy()
-        confidence = probabilities[predicted_digit]
-        
-        return predicted_digit, float(confidence), probabilities
+        return None
 
 def log_prediction(predicted_digit, confidence, true_label=None, image=None):
     """Log prediction to PostgreSQL database"""
@@ -371,12 +295,12 @@ def main():
     if st.sidebar.button("Test Connection"):
         success, message = test_db_connection()
         if success:
-            st.sidebar.success(f"Connection successful!\n{message}")
+            st.sidebar.success(f"Connection successful!")
             # Reset the connection failed flag if it was set
             if hasattr(st.session_state, 'db_connection_failed'):
                 del st.session_state.db_connection_failed
         else:
-            st.sidebar.error(f"Connection failed: {message}")
+            st.sidebar.error(f"Connection failed.")
             st.session_state.db_connection_failed = True
     
     # Check database setup
@@ -390,12 +314,13 @@ def main():
     tab1, tab2 = st.tabs(["Draw & Predict", "Statistics"])
     
     with tab1:
-        st.markdown("Draw a digit on the canvas, set the true label and click 'Predict' to see the model's prediction.")
+        # Add a hint for using the application
+        st.info("ℹ️ Draw a digit on the canvas, set the true label and click 'Predict' to see the model's prediction.")
         
-        # Load model
-        model, device = load_model()
+        # Load predictor
+        predictor = load_predictor()
         
-        if model is None:
+        if predictor is None:
             st.error("Failed to load model. Please check if the model file exists.")
             return
         
@@ -404,6 +329,35 @@ def main():
         
         with drawing_column:
             st.subheader("Draw a digit (0-9)")
+            
+            # Initialize canvas state if needed
+            if 'canvas_key' not in st.session_state:
+                st.session_state.canvas_key = "canvas_1"
+            
+            # Add a styled clear canvas button
+            st.markdown(
+                """
+                <style>
+                div.stButton > button {
+                    width: 100%;
+                    font-weight: bold;
+                    margin-bottom: 10px;
+                }
+                </style>
+                """, 
+                unsafe_allow_html=True
+            )
+            
+            if st.button("🗑️ Clear Canvas", key="clear_canvas", help="Clear the canvas"):
+                # Clear any stored prediction
+                if 'current_prediction' in st.session_state:
+                    del st.session_state.current_prediction
+                # Clear true label if it exists
+                if 'true_label' in st.session_state:
+                    del st.session_state.true_label
+                # Change the canvas key to force a reset
+                st.session_state.canvas_key = f"canvas_{int(time.time())}"
+                st.rerun()
             
             # Create canvas for drawing
             canvas_result = st_canvas(
@@ -414,26 +368,40 @@ def main():
                 height=280,
                 width=280,
                 drawing_mode="freedraw",
-                key="canvas",
+                key=st.session_state.canvas_key,
+                display_toolbar=False,
+                update_streamlit=True
             )
             
-            # Add buttons for actions
-            clear_canvas_button, true_label_input, predict_button = st.columns(3)
+            # More robust check for canvas data
+            if canvas_result.image_data is not None:
+                # Check if there are any non-black pixels (values > 0)
+                # For RGB images, check if any channel has values > 0
+                if len(canvas_result.image_data.shape) > 2:  # RGB image
+                    # Sum across all channels
+                    pixel_sum = np.sum(canvas_result.image_data[:, :, :3])
+                else:  # Grayscale image
+                    pixel_sum = np.sum(canvas_result.image_data)
+                
+                # Consider the canvas to have data if there are enough non-black pixels
+                # This threshold can be adjusted as needed
+                canvas_has_data = pixel_sum > 1000
+
+            else:
+                canvas_has_data = False
+                st.sidebar.write("Canvas data is None")
             
-            with clear_canvas_button:
-                if st.button("Clear Canvas"):
-                    # This will trigger a rerun and reset the canvas
-                    st.session_state.canvas_cleared = True
-                    # Clear any stored prediction
-                    if 'current_prediction' in st.session_state:
-                        del st.session_state.current_prediction
-                    # Clear true label if it exists
-                    if 'true_label' in st.session_state:
-                        del st.session_state.true_label
-                    st.rerun()
+            true_label_provided = 'true_label' in st.session_state
+            
+            # Initialize prediction_attempted flag if it doesn't exist
+            if 'prediction_attempted' not in st.session_state:
+                st.session_state.prediction_attempted = False
+            
+            # Add true label input and predict button
+            true_label_input, predict_button = st.columns(2)
             
             with true_label_input:
-                # Simple number input for true label (no form needed)
+                # Simple number input for true label
                 st.subheader("True Label")
                 true_label = st.number_input("Enter Digit (0-9):", 
                                           min_value=0, max_value=9, step=1,
@@ -445,42 +413,62 @@ def main():
                     st.session_state.true_label = true_label
 
             with predict_button:
-                # Check if canvas has data and true label is provided
-                canvas_has_data = canvas_result.image_data is not None and np.sum(canvas_result.image_data) > 0
-                true_label_provided = 'true_label' in st.session_state
+                # Button is enabled only if canvas has data
+                predict_enabled = canvas_has_data
                 
-                # Button is enabled only if both conditions are met
-                predict_enabled = canvas_has_data and true_label_provided
+                # Custom styling for the predict button based on its state
+                button_style = """
+                <style>
+                .stButton button {
+                    width: 100%;
+                }
+                .stButton button[disabled] {
+                    opacity: 0.6;
+                    cursor: not-allowed;
+                    border: 1px solid #ccc;
+                }
+                </style>
+                """
+                st.markdown(button_style, unsafe_allow_html=True)
+                
+                st.subheader("Predict")
+                
+                # Add a visual indicator of button state
+                if predict_enabled:
+                    button_text = "✅ Run Prediction"
+                else:
+                    button_text = "❌ Run Prediction"
                 
                 predict_button_clicked = st.button(
-                    "Predict", 
+                    button_text, 
                     disabled=not predict_enabled,
-                    type="primary" if predict_enabled else "secondary"
+                    type="primary" if predict_enabled else "secondary",
+                    key="predict_button"
                 )
                 
-                if not canvas_has_data and predict_button_clicked:
-                    st.warning("Please draw a digit first.")
-                elif not true_label_provided and predict_button_clicked:
-                    st.warning("Please provide the true label first.")
+                # Set prediction_attempted to True if button is clicked
+                if predict_button_clicked:
+                    st.session_state.prediction_attempted = True
+            
         
         with results_column:
             st.subheader("Prediction Results")
             
             # Handle predict button click
-            if predict_button_clicked and canvas_has_data and true_label_provided:
+            if predict_button_clicked and canvas_has_data:
                 # Get the drawn image
                 image_data = canvas_result.image_data
                 
                 # Convert to grayscale and resize to 28x28
                 image = Image.fromarray(image_data.astype(np.uint8)).convert('L')
                 
-                # Make prediction
-                predicted_digit, confidence, probabilities = predict(model, device, image)
+                # Make prediction using the predictor
+                predicted_digit, confidence, probabilities = predictor.predict(image)
                 
                 # Get true label from session state
                 true_label = st.session_state.true_label
                 
-
+                # Log prediction to database
                 log_success = log_prediction(predicted_digit, confidence, true_label, image)
                 if log_success:
                     st.success(f"Prediction logged with true label: {true_label}")
@@ -528,17 +516,17 @@ def main():
                     'Probability': [float(p) for p in probabilities]
                 })
                 st.bar_chart(prob_df, x='Digit', y='Probability')
-
-
     
     with tab2:
-        side1, side2 = st.columns(2)
-        with side1:
-            st.subheader("Prediction Statistics")
-            # Get statistics from database
-            stats = get_statistics()
+        # Get statistics from database
+        stats = get_statistics()
+        
+        if stats:
+            # Create three columns for the top section
+            side1, side2, side3 = st.columns(3)
             
-            if stats:
+            with side1:
+                st.subheader("Prediction Statistics")
                 # Display total predictions
                 st.metric("Total Predictions", stats['total_count'])
                 
@@ -557,9 +545,10 @@ def main():
                             st.metric("Accuracy", f"{stats['accuracy_stats'][3]}%")
                     else:
                         st.info("No accuracy statistics available yet. Please provide feedback on your predictions.")
-                
+            
+            with side2:
                 # Display digit statistics
-                st.markdown("### Digit-specific Statistics")
+                st.subheader("Digit-specific Statistics")
                 
                 if stats['digit_stats']:
                     # Create a dataframe for digit statistics
@@ -580,40 +569,62 @@ def main():
                     digit_df["Count"] = digit_df["Count"].astype(int)
                     digit_df["Avg. Confidence"] = digit_df["Avg. Confidence"].astype(str)
                     st.dataframe(digit_df)
-                    
-                    # Create a bar chart for digit distribution
-                    st.markdown("### Digit Distribution")
-                    st.bar_chart({str(digit): count for digit, count, _ in stats['digit_stats']})
                 else:
                     st.info("No digit statistics available yet. Make some predictions first.")
             
-
-        with side2:
-            # Display recent predictions
-            st.markdown("### Recent Predictions")
+            with side3:
+                # Display recent predictions
+                st.subheader("Recent Predictions")
+                
+                if stats['recent_predictions']:
+                    recent_data = {
+                        "Time": [],
+                        "Predicted": [],
+                        "Confidence": [],
+                        "True Label": []
+                    }
+                    
+                    for pred in stats['recent_predictions']:
+                        recent_data["Time"].append(pred[0])
+                        recent_data["Predicted"].append(str(pred[1]))  # Convert to string
+                        recent_data["Confidence"].append(f"{pred[2]:.2f}")
+                        # Convert true_label to string to avoid type conversion issues
+                        recent_data["True Label"].append(str(pred[3]) if pred[3] is not None else "Not provided")
+                    
+                    # Convert to pandas DataFrame with explicit dtypes
+                    df = pd.DataFrame(recent_data)
+                    # Ensure True Label column is treated as string
+                    df["True Label"] = df["True Label"].astype(str)
+                    st.dataframe(df)
+                else:
+                    st.info("No predictions have been made yet.")
             
-            if stats['recent_predictions']:
-                recent_data = {
-                    "Time": [],
-                    "Predicted": [],
-                    "Confidence": [],
-                    "True Label": []
-                }
-                
-                for pred in stats['recent_predictions']:
-                    recent_data["Time"].append(pred[0])
-                    recent_data["Predicted"].append(str(pred[1]))  # Convert to string
-                    recent_data["Confidence"].append(f"{pred[2]:.2f}")
-                    # Convert true_label to string to avoid type conversion issues
-                    recent_data["True Label"].append(str(pred[3]) if pred[3] is not None else "Not provided")
-                
-                # Convert to pandas DataFrame with explicit dtypes
-                df = pd.DataFrame(recent_data)
-                # Ensure True Label column is treated as string
-                df["True Label"] = df["True Label"].astype(str)
-                st.dataframe(df)
-            else:
-                st.info("No predictions have been made yet.")
-                st.info("No statistics available. Make some predictions first or check database connection.")
+            # Add a separator
+            st.markdown("---")
+            
+            # Display digit distribution chart below the three columns
+            if stats['digit_stats']:
+                st.subheader("Digit Distribution")
+                # Create a larger chart by using a container with custom CSS
+                chart_container = st.container()
+                with chart_container:
+                    # Add some padding for better visual appearance
+                    st.markdown(
+                        """
+                        <style>
+                        .digit-distribution-chart {
+                            padding: 20px 0;
+                        }
+                        </style>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                    # Create the bar chart with the full width
+                    st.markdown('<div class="digit-distribution-chart">', unsafe_allow_html=True)
+                    st.bar_chart({str(digit): count for digit, count, _ in stats['digit_stats']})
+                    st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.info("No statistics available. Make some predictions first or check database connection.")
+
 if __name__ == "__main__":
     main() 

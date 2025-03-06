@@ -1,180 +1,65 @@
+# MNIST Classifier Model
+
+PyTorch implementation of a Convolutional Neural Network (CNN) for MNIST digit classification.
+
+Run the script `run_model.py` in the parent directory, it trains the model and generates a visualisation for the prediction of 5 numbers.
+
+Example visualisation (can be found in /results folder after each generation):
+![test_predictions](results/test_predictions.png)
+
 # MNIST Digit Classifier
 
-A simple end-to-end application for classifying handwritten digits using the MNIST dataset.
-
-## Project Overview
-
-This project implements a complete MNIST digit classifier with the following components:
-
-1. **PyTorch Model**: A convolutional neural network trained on the MNIST dataset
-2. **Streamlit Web Interface**: Interactive web app for drawing digits and getting predictions
-3. **PostgreSQL Database**: Logs predictions and user feedback
-4. **Docker Containerization**: Easy deployment with Docker Compose
-
-## Project Structure
-
-```
-├── model/                  # PyTorch model architecture
-├── streamlit/              # Streamlit web application
-│   └── app.py              # Main Streamlit application
-├── database/               # Database setup
-│   └── init.sql            # SQL initialization script
-├── saved_models/           # Directory for saved model weights
-│   └── mnist_classifier.pth # Trained model weights
-├── train_model.py          # Script to train the model
-├── run_streamlit.py        # Script to run the Streamlit app
-├── docker-compose.yml      # Docker Compose configuration
-├── Dockerfile              # Dockerfile for the application
-└── requirements.txt        # Python dependencies
-```
-
-## Quick Start
-
-### Option 1: Using Docker (Recommended)
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/yourusername/mnist-classifier.git
-   cd mnist-classifier
-   ```
-
-2. Build and start the containers:
-
-   ```bash
-   docker-compose up -d
-   ```
-
-3. Access the web application at http://localhost:8501
-
-### Option 2: Local Development
-
-1. Clone the repository:
-
-   ```bash
-   git clone https://github.com/yourusername/mnist-classifier.git
-   cd mnist-classifier
-   ```
-
-2. Create a virtual environment and install dependencies:
-
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-
-3. Train the model (optional, a pre-trained model is included):
-
-   ```bash
-   python train_model.py
-   ```
-
-4. Set up the PostgreSQL database:
-
-   - Install PostgreSQL if not already installed
-   - Create a database named `mnist_db`
-   - Run the initialization script: `psql -U postgres -d mnist_db -f database/init.sql`
-
-5. Create a `.env` file with the following content:
-
-   ```
-   MODEL_PATH=saved_models/mnist_classifier.pth
-   DB_HOST=localhost
-   DB_PORT=5432
-   DB_NAME=mnist_db
-   DB_USER=postgres
-   DB_PASSWORD=postgres
-   ```
-
-6. Run the Streamlit app:
-   ```bash
-   python run_streamlit.py
-   ```
+A web application for classifying handwritten digits using a trained neural network model.
 
 ## Features
 
-### 1. Drawing Interface
+- Draw digits on a canvas
+- Get real-time predictions with confidence scores
+- View statistics on prediction accuracy
+- Store predictions in a PostgreSQL database
 
-- Interactive grid for drawing digits
-- Clear button to reset the canvas
+## Local Development
 
-### 2. Prediction
+### Setup
 
-- Real-time prediction of drawn digits
-- Confidence scores for each digit class
-- Visualization of prediction probabilities
+1. Clone the repository:
+   ```
+   git clone <repository-url>
+   ```
 
-### 3. Feedback System
+2. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
 
-- Option to provide the correct label for incorrect predictions
-- Logging of user feedback to improve model evaluation
+3. Set up environment variables in a `.env` file:
+   ```
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5432
+   POSTGRES_DB=mnist_db
+   POSTGRES_USER=postgres
+   POSTGRES_PASSWORD=
+   MODEL_PATH=saved_models/mnist_classifier.pth
+   ```
 
-### 4. Statistics Dashboard
+4. Run the application:
+   ```
+   python run_streamlit.py
+   ```
 
-- Overall accuracy statistics
-- Digit-specific performance metrics
-- Recent prediction history
-
-## Model Architecture
-
-The model is a Convolutional Neural Network (CNN) with the following architecture:
-
-1. **Convolutional Layers**:
-
-   - First layer: 1 input channel → 10 output channels, 5x5 kernel
-   - Second layer: 10 input channels → 20 output channels, 5x5 kernel
-   - Each followed by ReLU activation and 2x2 max pooling
-
-2. **Fully Connected Layers**:
-
-   - First layer: 320 input features → 50 output features
-   - Second layer: 50 input features → 10 output features (one for each digit)
-
-3. **Regularization**:
-   - Dropout after second convolutional layer
-   - Dropout after first fully connected layer
+## Access the application at:
 
 ## Database Schema
 
-The PostgreSQL database includes:
+The application uses a PostgreSQL database with the following schema:
 
-1. **predictions table**:
-
-   - Stores prediction details (timestamp, predicted digit, confidence, true label)
-   - Optionally stores the image data
-
-2. **Views for statistics**:
-   - `prediction_accuracy`: Overall accuracy metrics
-   - `digit_statistics`: Per-digit performance metrics
-
-## Docker Setup
-
-The Docker setup includes:
-
-1. **Web Application Container**:
-
-   - Python 3.9 with PyTorch and Streamlit
-   - Runs the Streamlit application
-
-2. **PostgreSQL Container**:
-   - Stores prediction data
-   - Initialized with the schema from `database/init.sql`
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-```bash
-# Train the model
-python run_model.py --mode train
-
-# Test the model
-python run_model.py --mode test --test-samples 8
-
-# Both train and test
-python run_model.py --mode both
-```
+- `predictions` table:
+  - `id`: Serial primary key
+  - `timestamp`: Timestamp of the prediction
+  - `predicted_digit`: The digit predicted by the model (0-9)
+  - `confidence`: The confidence score of the prediction (0-1)
+  - `true_label`: The true label provided by the user (optional)
+  - `image_data`: Binary data of the drawn image
 
 ## Files
 
