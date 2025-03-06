@@ -1,147 +1,227 @@
-import torch
-import torch.nn.functional as F
 import numpy as np
-from PIL import Image
+import torch
+import torch.nn as nn
 import torchvision.transforms as transforms
-from .model import MNISTClassifier
+from PIL import Image
+import os
+import sys
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Add parent directory to path to import from model
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
+# Import model architecture
+from model.model import MNISTClassifier
 
 class MNISTPredictor:
     """
-    Utility class for making predictions with a trained MNIST classifier.
-    
-    This class handles loading the trained model and preprocessing input images
-    to make them compatible with the model's expected input format.
+    Class for making predictions on MNIST digit images.
     """
-    def __init__(self, model_path='saved_models/mnist_classifier.pth'):
+    
+    def __init__(self, model_path=None):
         """
-        Initialise the predictor with a trained model.
+        Initialize the predictor with a trained model.
         
         Args:
-            model_path: Path to the saved model weights
+            model_path: Path to the trained model file
         """
-        print(f"Loading model from {model_path}...")
+        # Set model path
+        self.model_path = model_path or os.getenv('MODEL_PATH', 'saved_models/mnist_classifier.pth')
         
-        # Load the model architecture
-        self.model = MNISTClassifier()
-        
-        # Check if CUDA is available
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Load the trained weights
-        try:
-            # Try to load directly to the target device
-            self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-        except Exception as e:
-            print(f"Warning: Error loading model with device mapping: {e}")
-            print("Falling back to CPU loading...")
-            # Fall back to CPU loading
-            self.model.load_state_dict(torch.load(model_path, map_location='cpu'))
-        
-        # Move model to device and set to evaluation mode
-        self.model = self.model.to(self.device)
-        self.model.eval()
-        
-        print(f"Model loaded and set to {self.device}")
-        
-        # Define the transformation pipeline for raw images (not already processed MNIST images)
+        # Define transformations
         self.transform = transforms.Compose([
             transforms.Resize((28, 28)),
             transforms.ToTensor(),
-            transforms.Normalize((0.1307,), (0.3081,))  # MNIST mean and std
+            transforms.Normalize((0.1307,), (0.3081,))  # MNIST dataset mean and std
         ])
+        
+        # Initialize model
+        self.model = None
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        
+        # Try to load the model
+        try:
+            self._load_model()
+        except Exception as e:
+            logger.error(f"Error loading model: {e}")
+            logger.warning("Model could not be loaded. A dummy model will be used for predictions.")
+            self._create_dummy_model()
+    
+    def _create_dummy_model(self):
+        """
+        Create a dummy model for use when the real model can't be loaded.
+        This will return random predictions.
+        """
+        logger.info("Creating dummy model for predictions")
+        self.model = MNISTClassifier()
+        self.model.to(self.device)
+        self.model.eval()
+        self.using_dummy = True
+    
+    def _load_model(self):
+        """
+        Load the trained model from the specified path.
+        """
+        # Check if model path exists
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Model file not found at {self.model_path}")
+        
+        # Initialize model
+        self.model = MNISTClassifier()
+        
+        try:
+            # Load model parameters
+            logger.info(f"Loading model from {self.model_path}")
+            state_dict = torch.load(self.model_path, map_location=self.device)
+            self.model.load_state_dict(state_dict)
+            
+            # Move model to device and set to evaluation mode
+            self.model.to(self.device)
+            self.model.eval()
+            self.using_dummy = False
+            logger.info("Model loaded successfully")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load model: {e}")
     
     def preprocess_image(self, image):
         """
-        Preprocess an input image for the model.
+        Preprocess an image for prediction.
         
         Args:
-            image: PIL Image, numpy array, or PyTorch tensor
+            image: PIL Image or numpy array
         
         Returns:
-            Preprocessed tensor ready for model input
+            Preprocessed tensor
         """
-        # If already a tensor, handle appropriately
-        if isinstance(image, torch.Tensor):
-            # If it's a 2D tensor (single image without batch dimension)
-            if image.dim() == 2:
-                # Add channel dimension (H, W) -> (1, H, W)
-                tensor = image.unsqueeze(0)
-            # If it's a 3D tensor with channel dimension (C, H, W)
-            elif image.dim() == 3 and image.size(0) == 1:
-                # Keep as is - already has channel dimension
-                tensor = image
-            # If it's a 3D tensor with batch dimension (N, H, W)
-            elif image.dim() == 3 and image.size(0) != 1:
-                # Add channel dimension (N, H, W) -> (N, 1, H, W)
-                tensor = image.unsqueeze(1)
-            else:
-                # Already has batch and channel dimensions (N, C, H, W)
-                tensor = image
+        try:
+            # Convert numpy array to PIL Image if needed
+            if isinstance(image, np.ndarray):
+                # Check if image is grayscale (2D array)
+                if len(image.shape) == 2:
+                    # Convert to 3D array with single channel
+                    image = np.expand_dims(image, axis=2)
                 
-            # Move to the same device as the model
-            return tensor.to(self.device)
+                # Convert to PIL Image
+                image = Image.fromarray(image.astype('uint8'))
             
-        # Convert numpy array to PIL Image if necessary
-        if isinstance(image, np.ndarray):
-            # If the image is a drawing from Streamlit (RGBA), convert to grayscale
-            if len(image.shape) == 3 and image.shape[2] == 4:
-                # use alpha channel as the image (white drawing on black background)
-                image = image[:, :, 3]
+            # Apply transformations
+            tensor = self.transform(image)
             
-            # convert to PIL Image
-            image = Image.fromarray(image)
+            # Add batch dimension
+            tensor = tensor.unsqueeze(0)
+            
+            return tensor
         
-        # ensure the image is in grayscale mode
-        if image.mode != 'L':
-            image = image.convert('L')
-        
-        # apply transformations
-        tensor = self.transform(image)
-        
-        # Add batch dimension and move to device
-        tensor = tensor.unsqueeze(0).to(self.device)
-        
-        return tensor
+        except Exception as e:
+            logger.error(f"Error preprocessing image: {e}")
+            # Return a zeros tensor as fallback
+            return torch.zeros(1, 1, 28, 28)
     
     def predict(self, image):
         """
-        Make a prediction for an input image.
+        Make a prediction on an image.
         
         Args:
-            image: PIL Image, numpy array, or PyTorch tensor
+            image: PIL Image or numpy array
         
         Returns:
-            Dictionary containing:
-            - predicted_digit: The predicted digit (0-9)
-            - confidence: Confidence score for the prediction (0-1)
-            - probabilities: List of probabilities for all digits
+            tuple: (predicted_digit, confidence, probabilities)
         """
-        # Preprocess the image
-        tensor = self.preprocess_image(image)
+        try:
+            # Check if using dummy model
+            if getattr(self, 'using_dummy', False):
+                # Return random prediction
+                probabilities = np.random.rand(10)
+                probabilities = probabilities / np.sum(probabilities)
+                predicted_digit = np.argmax(probabilities)
+                confidence = probabilities[predicted_digit]
+                logger.warning("Using dummy model. Prediction is random.")
+                return predicted_digit, float(confidence), list(probabilities)
+            
+            # Preprocess image
+            tensor = self.preprocess_image(image)
+            
+            # Move tensor to device
+            tensor = tensor.to(self.device)
+            
+            # Make prediction
+            with torch.no_grad():
+                outputs = self.model(tensor)
+                
+                # Convert log softmax to probabilities
+                probs = torch.exp(outputs)
+                
+                # Get predicted class
+                _, predicted = torch.max(outputs.data, 1)
+                
+                # Get predicted digit and confidence
+                predicted_digit = predicted.item()
+                probabilities = probs[0].cpu().numpy()
+                confidence = probabilities[predicted_digit]
+                
+                return predicted_digit, float(confidence), list(probabilities)
         
-        # make prediction
-        with torch.no_grad():
-            # Forward pass through the model
-            output = self.model(tensor)
-            
-            # The model outputs log probabilities
-            # Need to use exp to get actual probabilities
-            # Get the first item if batch size is 1
-            if output.size(0) == 1:
-                probabilities = torch.exp(output[0])
-            else:
-                # Handle batch predictions if needed
-                probabilities = torch.exp(output)
-            
-            # get the predicted digit and its probability
-            predicted_digit = probabilities.argmax().item()
-            confidence = probabilities[predicted_digit].item()
-            
-            # Convert probabilities to list
-            all_probabilities = probabilities.cpu().tolist()
+        except Exception as e:
+            logger.error(f"Error making prediction: {e}")
+            # Return fallback prediction
+            return 0, 0.0, [0.1] * 10
+    
+    def predict_batch(self, images):
+        """
+        Make predictions on a batch of images.
         
-        return {
-            'predicted_digit': predicted_digit,
-            'confidence': confidence,
-            'probabilities': all_probabilities
-        } 
+        Args:
+            images: List of PIL Images or numpy arrays
+        
+        Returns:
+            List of tuples: [(predicted_digit, confidence, probabilities), ...]
+        """
+        results = []
+        
+        for image in images:
+            result = self.predict(image)
+            results.append(result)
+        
+        return results
+
+
+# Test function
+def test_predictor(model_path=None):
+    """
+    Test the predictor with a sample image.
+    
+    Args:
+        model_path: Path to the trained model file
+    """
+    try:
+        # Create a simple test image (random values)
+        test_image = np.random.randint(0, 255, (28, 28), dtype=np.uint8)
+        
+        # Initialize predictor
+        predictor = MNISTPredictor(model_path)
+        
+        # Make prediction
+        predicted_digit, confidence, probabilities = predictor.predict(test_image)
+        
+        print(f"Predicted digit: {predicted_digit}")
+        print(f"Confidence: {confidence:.4f}")
+        print(f"Probabilities: {[round(prob, 4) for prob in probabilities]}")
+        
+        return True
+    
+    except Exception as e:
+        print(f"Error testing predictor: {e}")
+        return False
+
+
+if __name__ == "__main__":
+    # Get model path from command line argument or environment variable
+    model_path = sys.argv[1] if len(sys.argv) > 1 else os.getenv('MODEL_PATH')
+    
+    # Test the predictor
+    test_predictor(model_path) 

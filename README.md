@@ -7,16 +7,59 @@ Run the script `run_model.py` in the parent directory, it trains the model and g
 Example visualisation (can be found in /results folder after each generation):
 ![test_predictions](results/test_predictions.png)
 
-```bash
-# Train the model
-python run_model.py --mode train
+# MNIST Digit Classifier
 
-# Test the model
-python run_model.py --mode test --test-samples 8
+A web application for classifying handwritten digits using a trained neural network model.
 
-# Both train and test
-python run_model.py --mode both
-```
+## Features
+
+- Draw digits on a canvas
+- Get real-time predictions with confidence scores
+- View statistics on prediction accuracy
+- Store predictions in a PostgreSQL database
+
+## Local Development
+
+### Setup
+
+1. Clone the repository:
+   ```
+   git clone <repository-url>
+   ```
+
+2. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+3. Set up environment variables in a `.env` file:
+   ```
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5432
+   POSTGRES_DB=mnist_db
+   POSTGRES_USER=postgres
+   POSTGRES_PASSWORD=
+   MODEL_PATH=saved_models/mnist_classifier.pth
+   ```
+
+4. Run the application:
+   ```
+   python run_streamlit.py
+   ```
+
+## Access the application at:
+
+## Database Schema
+
+The application uses a PostgreSQL database with the following schema:
+
+- `predictions` table:
+  - `id`: Serial primary key
+  - `timestamp`: Timestamp of the prediction
+  - `predicted_digit`: The digit predicted by the model (0-9)
+  - `confidence`: The confidence score of the prediction (0-1)
+  - `true_label`: The true label provided by the user (optional)
+  - `image_data`: Binary data of the drawn image
 
 ## Files
 
