@@ -66,6 +66,10 @@ def find_model_file():
 
 def main():
     """Main function to run the Streamlit app"""
+    # Print current working directory for debugging
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Files in current directory: {os.listdir('.')}")
+    
     # Check dependencies
     check_dependencies()
     
@@ -78,6 +82,9 @@ def main():
     if model_path:
         # Set model path environment variable
         os.environ['MODEL_PATH'] = model_path
+        print(f"Model path set to: {model_path}")
+    else:
+        print("WARNING: No model file found. The application may not work correctly.")
     
     # Print information about the application
     print("\n" + "="*50)
@@ -92,8 +99,26 @@ def main():
 
     print("="*50 + "\n")
     
-    # Run the Streamlit app
-    subprocess.run(["streamlit", "run", "streamlit/app.py"])
+    # Get the port from environment variable (for Cloud Run)
+    port = int(os.environ.get("PORT", 8080))
+    
+    print(f"Starting Streamlit on port {port}")
+    
+    # Check if streamlit/app.py exists
+    if not os.path.exists("streamlit/app.py"):
+        print(f"ERROR: streamlit/app.py not found. Files in streamlit directory: {os.listdir('streamlit')}")
+        sys.exit(1)
+    
+    # Run the Streamlit app with the correct host and port
+    # Using --server.address=0.0.0.0 ensures it binds to all network interfaces
+    # Using --server.port ensures it uses the port provided by Cloud Run
+    cmd = [
+        "streamlit", "run", "streamlit/app.py",
+        "--server.address=0.0.0.0",
+        f"--server.port={port}"
+    ]
+    print(f"Running command: {' '.join(cmd)}")
+    subprocess.run(cmd)
 
 if __name__ == "__main__":
     main() 

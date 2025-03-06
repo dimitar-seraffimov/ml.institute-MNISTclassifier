@@ -7,13 +7,11 @@ import streamlit as st
 from PIL import Image
 import psycopg2
 import io
-import base64
 import time
-import datetime
 from dotenv import load_dotenv
 from streamlit_drawable_canvas import st_canvas
 import pandas as pd
-import json
+
 
 # Add parent directory to path to import from model
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,12 +29,26 @@ st.set_page_config(
 
 # Database connection parameters
 DB_PARAMS = {
-    'host': 'localhost',
-    'port': '5432',
-    'database': 'mnist_db',
-    'user': 'postgres',
-    'password': 'master'
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'port': os.getenv('DB_PORT', '5432'),
+    'database': os.getenv('DB_NAME', 'mnist_db'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD', 'master')
 }
+
+# Support for DATABASE_URL format (used by many cloud providers)
+DATABASE_URL = os.getenv('DATABASE_URL', '')
+if DATABASE_URL:
+    # Parse DATABASE_URL and override DB_PARAMS
+    try:
+        # Format: postgres://username:password@hostname:port/database
+        import re
+        pattern = r'postgres://(?P<user>[^:]+):(?P<password>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)/(?P<database>.+)'
+        match = re.match(pattern, DATABASE_URL)
+        if match:
+            DB_PARAMS = match.groupdict()
+    except Exception as e:
+        st.error(f"Failed to parse DATABASE_URL: {e}")
 
 # Model path
 MODEL_PATH = os.getenv('MODEL_PATH', 'saved_models/mnist_classifier.pth')
@@ -67,20 +79,12 @@ def log_prediction(predicted_digit, confidence, true_label=None, image=None):
         cursor = conn.cursor()
         
         # Insert prediction into database
-        query = """
-            INSERT INTO predictions 
-            (timestamp, predicted_digit, confidence, true_label, image_data)
-            VALUES (%s, %s, %s, %s, %s)
-        """
+        cursor.execute("""
+            INSERT INTO predictions (timestamp, predicted_digit, confidence, true_label, image_data)
+            VALUES (NOW(), %s, %s, %s, %s)
+        """, (predicted_digit, confidence, true_label, image_data))
         
-        # Execute query with parameters
-        cursor.execute(
-            query, 
-            (datetime.datetime.now(), predicted_digit, confidence, true_label,
-             psycopg2.Binary(image_data) if image_data else None)
-        )
-        
-        # Commit transaction
+        # Commit changes
         conn.commit()
         
         # Close cursor and connection
@@ -88,14 +92,9 @@ def log_prediction(predicted_digit, confidence, true_label=None, image=None):
         conn.close()
         
         return True
-    except psycopg2.OperationalError as e:
-        # Don't show warning for every prediction if we already know the database is unavailable
-        if not hasattr(st.session_state, 'db_connection_failed'):
-            st.warning(f"Could not log to database: {e}")
-            st.session_state.db_connection_failed = True
-        return False
     except Exception as e:
-        st.warning(f"Could not log to database: {e}")
+        # Log error but don't crash the application
+        print(f"Error logging prediction to database: {e}")
         return False
 
 def get_statistics():
@@ -235,37 +234,26 @@ def ensure_database_setup():
             
             # Create views for statistics
             cursor.execute("""
-                CREATE OR REPLACE VIEW prediction_accuracy AS
-                SELECT
+                CREATE OR REPLACE VIEW accuracy_stats AS
+                SELECT 
                     COUNT(*) AS total_predictions,
-                    SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_predictions,
-                    SUM(CASE WHEN predicted_digit != true_label THEN 1 ELSE 0 END) AS incorrect_predictions,
+                    COUNT(true_label) AS predictions_with_true_label,
                     CASE 
-                        WHEN COUNT(*) > 0 THEN 
-                            ROUND((SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END)::NUMERIC / COUNT(*)::NUMERIC) * 100, 2)
-                        ELSE 0
-                    END AS accuracy_percentage,
+                        WHEN COUNT(true_label) > 0 THEN 
+                            CAST(SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS NUMERIC) / COUNT(true_label)
+                        ELSE 0 
+                    END AS accuracy,
                     CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence
                 FROM predictions
-                WHERE true_label IS NOT NULL
             """)
             
-            # Create view for digit-specific statistics
             cursor.execute("""
                 CREATE OR REPLACE VIEW digit_stats AS
-                SELECT
-                    predicted_digit,
-                    COUNT(*) AS prediction_count,
-                    SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_predictions,
-                    SUM(CASE WHEN predicted_digit != true_label THEN 1 ELSE 0 END) AS incorrect_predictions,
-                    CASE 
-                        WHEN COUNT(*) > 0 THEN 
-                            ROUND((SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END)::NUMERIC / COUNT(*)::NUMERIC) * 100, 2)
-                        ELSE 0
-                    END AS accuracy_percentage,
+                SELECT 
+                    predicted_digit AS digit,
+                    COUNT(*) AS count,
                     CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence
                 FROM predictions
-                WHERE true_label IS NOT NULL
                 GROUP BY predicted_digit
                 ORDER BY predicted_digit
             """)
@@ -273,17 +261,15 @@ def ensure_database_setup():
             # Commit changes
             conn.commit()
             st.sidebar.success("Database tables created successfully!")
-            table_exists = True
         
         # Close cursor and connection
         cursor.close()
         conn.close()
         
-        return table_exists
+        return True
     except Exception as e:
-        if not hasattr(st.session_state, 'db_connection_failed'):
-            st.warning(f"Database setup failed: {e}")
-            st.session_state.db_connection_failed = True
+        st.sidebar.warning(f"Database setup error: {e}")
+        st.sidebar.info("Running in local mode without database persistence.")
         return False
 
 def main():
@@ -543,7 +529,7 @@ def main():
                             st.metric("Incorrect Predictions", stats['accuracy_stats'][2])
                         with col3:
                             st.metric("Accuracy", f"{stats['accuracy_stats'][3]}%")
-                    else:
+            else:
                         st.info("No accuracy statistics available yet. Please provide feedback on your predictions.")
             
             with side2:
@@ -622,7 +608,6 @@ def main():
                     # Create the bar chart with the full width
                     st.markdown('<div class="digit-distribution-chart">', unsafe_allow_html=True)
                     st.bar_chart({str(digit): count for digit, count, _ in stats['digit_stats']})
-                    st.markdown('</div>', unsafe_allow_html=True)
         else:
             st.info("No statistics available. Make some predictions first or check database connection.")
 
