@@ -93,6 +93,8 @@ def ensure_database_setup():
                 SELECT 
                     COUNT(*) AS total_predictions,
                     COUNT(true_label) AS predictions_with_true_label,
+                    SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_predictions,
+                    SUM(CASE WHEN predicted_digit != true_label AND true_label IS NOT NULL THEN 1 ELSE 0 END) AS incorrect_predictions,
                     CASE 
                         WHEN COUNT(true_label) > 0 THEN 
                             CAST(SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS NUMERIC) / COUNT(true_label) * 100
@@ -107,7 +109,9 @@ def ensure_database_setup():
                 SELECT 
                     predicted_digit AS digit,
                     COUNT(*) AS count,
-                    CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence
+                    CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence,
+                    SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_count,
+                    SUM(CASE WHEN predicted_digit != true_label AND true_label IS NOT NULL THEN 1 ELSE 0 END) AS incorrect_count
                 FROM predictions
                 GROUP BY predicted_digit
                 ORDER BY predicted_digit
@@ -116,6 +120,41 @@ def ensure_database_setup():
             # Commit changes
             conn.commit()
             print("Database tables created successfully!")
+        else:
+            # Update views to ensure they have the correct logic
+            print("Updating database views...")
+            
+            cursor.execute("""
+                CREATE OR REPLACE VIEW accuracy_stats AS
+                SELECT 
+                    COUNT(*) AS total_predictions,
+                    COUNT(true_label) AS predictions_with_true_label,
+                    SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_predictions,
+                    SUM(CASE WHEN predicted_digit != true_label AND true_label IS NOT NULL THEN 1 ELSE 0 END) AS incorrect_predictions,
+                    CASE 
+                        WHEN COUNT(true_label) > 0 THEN 
+                            CAST(SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS NUMERIC) / COUNT(true_label) * 100
+                        ELSE 0 
+                    END AS accuracy,
+                    CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence
+                FROM predictions
+            """)
+            
+            cursor.execute("""
+                CREATE OR REPLACE VIEW digit_stats AS
+                SELECT 
+                    predicted_digit AS digit,
+                    COUNT(*) AS count,
+                    CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence,
+                    SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_count,
+                    SUM(CASE WHEN predicted_digit != true_label AND true_label IS NOT NULL THEN 1 ELSE 0 END) AS incorrect_count
+                FROM predictions
+                GROUP BY predicted_digit
+                ORDER BY predicted_digit
+            """)
+            
+            conn.commit()
+            print("Database views updated successfully!")
         
         # Close cursor and connection
         cursor.close()
@@ -209,7 +248,8 @@ def get_statistics():
         
         # If no true labels, set default values
         if not stats['true_label_count'] or not stats['accuracy_stats']:
-            stats['accuracy_stats'] = (stats['total_predictions'], 0, 0, 0)
+            # Default values for: total_predictions, predictions_with_true_label, correct_predictions, incorrect_predictions, accuracy, avg_confidence
+            stats['accuracy_stats'] = (stats['total_predictions'], 0, 0, 0, 0.0, 0.0)
         
         # Get digit-specific statistics
         try:

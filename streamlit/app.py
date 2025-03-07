@@ -308,19 +308,19 @@ def main():
                     st.markdown("### Accuracy Statistics")
                     
                     # Check if we have any predictions with true labels
-                    if stats['accuracy_stats'][0] > 0:
+                    if stats['accuracy_stats'][1] > 0:  # predictions_with_true_label
                         col1, col2, col3 = st.columns(3)
                         with col1:
                             # Convert to int or float to avoid Decimal type errors
-                            correct_pred = int(stats['accuracy_stats'][1]) if isinstance(stats['accuracy_stats'][1], (int, float)) else float(stats['accuracy_stats'][1])
+                            correct_pred = int(stats['accuracy_stats'][2]) if isinstance(stats['accuracy_stats'][2], (int, float)) else float(stats['accuracy_stats'][2])
                             st.metric("Correct Predictions", correct_pred)
                         with col2:
                             # Convert to int or float to avoid Decimal type errors
-                            incorrect_pred = int(stats['accuracy_stats'][2]) if isinstance(stats['accuracy_stats'][2], (int, float)) else float(stats['accuracy_stats'][2])
+                            incorrect_pred = int(stats['accuracy_stats'][3]) if isinstance(stats['accuracy_stats'][3], (int, float)) else float(stats['accuracy_stats'][3])
                             st.metric("Incorrect Predictions", incorrect_pred)
                         with col3:
                             # Convert to float and format as string with % symbol
-                            accuracy = float(stats['accuracy_stats'][3]) if stats['accuracy_stats'][3] is not None else 0.0
+                            accuracy = float(stats['accuracy_stats'][4]) if stats['accuracy_stats'][4] is not None else 0.0
                             st.metric("Accuracy", f"{accuracy:.2f}%")
                 else:
                     st.info("No accuracy statistics available yet. Please provide feedback on your predictions.")
