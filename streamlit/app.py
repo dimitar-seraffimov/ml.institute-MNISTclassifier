@@ -5,17 +5,17 @@ import torch
 import torch.nn.functional as F
 import streamlit as st
 from PIL import Image
-import psycopg2
 import io
 import time
 from dotenv import load_dotenv
 from streamlit_drawable_canvas import st_canvas
 import pandas as pd
 
-
 # Add parent directory to path to import from model
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from model.inference import MNISTPredictor
+# Import from local directory, not from streamlit package
+from db_utils import ensure_database_setup, log_prediction, get_statistics
 
 # Load environment variables from .env file
 load_dotenv()
@@ -26,29 +26,6 @@ st.set_page_config(
     page_icon="🔢",
     layout="wide"
 )
-
-# Database connection parameters
-DB_PARAMS = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': os.getenv('DB_PORT', '5432'),
-    'database': os.getenv('DB_NAME', 'mnist_db'),
-    'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'master')
-}
-
-# Support for DATABASE_URL format (used by many cloud providers)
-DATABASE_URL = os.getenv('DATABASE_URL', '')
-if DATABASE_URL:
-    # Parse DATABASE_URL and override DB_PARAMS
-    try:
-        # Format: postgres://username:password@hostname:port/database
-        import re
-        pattern = r'postgres://(?P<user>[^:]+):(?P<password>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)/(?P<database>.+)'
-        match = re.match(pattern, DATABASE_URL)
-        if match:
-            DB_PARAMS = match.groupdict()
-    except Exception as e:
-        st.error(f"Failed to parse DATABASE_URL: {e}")
 
 # Model path
 MODEL_PATH = os.getenv('MODEL_PATH', 'saved_models/mnist_classifier.pth')
@@ -64,128 +41,14 @@ def load_predictor():
         st.error(f"Error loading model: {e}")
         return None
 
-def log_prediction(predicted_digit, confidence, true_label=None, image=None):
-    """Log prediction to PostgreSQL database"""
-    try:
-        # Convert image to binary data if provided
-        image_data = None
-        if image is not None:
-            img_byte_arr = io.BytesIO()
-            image.save(img_byte_arr, format='PNG')
-            image_data = img_byte_arr.getvalue()
-        
-        # Connect to database
-        conn = psycopg2.connect(**DB_PARAMS)
-        cursor = conn.cursor()
-        
-        # Insert prediction into database
-        cursor.execute("""
-            INSERT INTO predictions (timestamp, predicted_digit, confidence, true_label, image_data)
-            VALUES (NOW(), %s, %s, %s, %s)
-        """, (predicted_digit, confidence, true_label, image_data))
-        
-        # Commit changes
-        conn.commit()
-        
-        # Close cursor and connection
-        cursor.close()
-        conn.close()
-        
-        return True
-    except Exception as e:
-        # Log error but don't crash the application
-        print(f"Error logging prediction to database: {e}")
-        return False
-
-def get_statistics():
-    """Get prediction statistics from the database"""
-    try:
-        # Connect to database
-        conn = psycopg2.connect(**DB_PARAMS)
-        cursor = conn.cursor()
-        
-        # Get total predictions count
-        cursor.execute("SELECT COUNT(*) FROM predictions")
-        total_count = cursor.fetchone()[0]
-        
-        # Get count of predictions with true labels
-        cursor.execute("SELECT COUNT(*) FROM predictions WHERE true_label IS NOT NULL")
-        true_label_count = cursor.fetchone()[0]
-        
-        # Get accuracy statistics
-        try:
-            cursor.execute("""
-                SELECT 
-                    total_predictions,
-                    correct_predictions,
-                    incorrect_predictions,
-                    accuracy_percentage,
-                    avg_confidence
-                FROM prediction_accuracy
-            """)
-            accuracy_stats = cursor.fetchone()
-        except psycopg2.errors.UndefinedTable:
-            # View doesn't exist yet
-            accuracy_stats = None
-        
-        # If no accuracy stats yet (no true labels), create default values
-        if accuracy_stats is None:
-            accuracy_stats = (0, 0, 0, 0.0, 0.0)
-        
-        # Get digit-specific counts
-        try:
-            cursor.execute("""
-                SELECT 
-                    predicted_digit,
-                    COUNT(*) as prediction_count,
-                    CAST(AVG(confidence) AS NUMERIC(10,4)) as avg_confidence
-                FROM predictions
-                GROUP BY predicted_digit
-                ORDER BY predicted_digit
-            """)
-            digit_stats = cursor.fetchall()
-        except psycopg2.errors.UndefinedTable:
-            # Table doesn't exist yet
-            digit_stats = []
-        
-        # Get recent predictions
-        try:
-            cursor.execute("""
-                SELECT timestamp, predicted_digit, confidence, true_label
-                FROM predictions
-                ORDER BY timestamp DESC
-                LIMIT 10
-            """)
-            recent_predictions = cursor.fetchall()
-        except psycopg2.errors.UndefinedTable:
-            # Table doesn't exist yet
-            recent_predictions = []
-        
-        # Close cursor and connection
-        cursor.close()
-        conn.close()
-        
-        return {
-            'total_count': total_count,
-            'true_label_count': true_label_count,
-            'accuracy_stats': accuracy_stats,
-            'digit_stats': digit_stats,
-            'recent_predictions': recent_predictions
-        }
-    except psycopg2.OperationalError as e:
-        if not hasattr(st.session_state, 'db_connection_failed'):
-            st.warning(f"Could not fetch statistics: {e}")
-            st.session_state.db_connection_failed = True
-        return None
-    except Exception as e:
-        st.warning(f"Could not fetch statistics: {e}")
-        return None
-
 def test_db_connection():
     """Test connection to PostgreSQL database"""
     try:
+        import psycopg2
+        from db_utils import get_db_params
+        
         # Connect to database
-        conn = psycopg2.connect(**DB_PARAMS)
+        conn = psycopg2.connect(**get_db_params())
         cursor = conn.cursor()
         
         # Get PostgreSQL version
@@ -200,78 +63,6 @@ def test_db_connection():
     except Exception as e:
         return False, str(e)
 
-def ensure_database_setup():
-    """Ensure database is set up correctly"""
-    try:
-        # Connect to database
-        conn = psycopg2.connect(**DB_PARAMS)
-        cursor = conn.cursor()
-        
-        # Check if predictions table exists
-        cursor.execute("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = 'predictions'
-            )
-        """)
-        table_exists = cursor.fetchone()[0]
-        
-        # Create tables if they don't exist
-        if not table_exists:
-            st.sidebar.info("Creating database tables...")
-            
-            # Create predictions table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS predictions (
-                    id SERIAL PRIMARY KEY,
-                    timestamp TIMESTAMP NOT NULL,
-                    predicted_digit INTEGER NOT NULL,
-                    confidence NUMERIC(10, 4) NOT NULL,
-                    true_label INTEGER,
-                    image_data BYTEA
-                )
-            """)
-            
-            # Create views for statistics
-            cursor.execute("""
-                CREATE OR REPLACE VIEW accuracy_stats AS
-                SELECT 
-                    COUNT(*) AS total_predictions,
-                    COUNT(true_label) AS predictions_with_true_label,
-                    CASE 
-                        WHEN COUNT(true_label) > 0 THEN 
-                            CAST(SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS NUMERIC) / COUNT(true_label)
-                        ELSE 0 
-                    END AS accuracy,
-                    CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence
-                FROM predictions
-            """)
-            
-            cursor.execute("""
-                CREATE OR REPLACE VIEW digit_stats AS
-                SELECT 
-                    predicted_digit AS digit,
-                    COUNT(*) AS count,
-                    CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence
-                FROM predictions
-                GROUP BY predicted_digit
-                ORDER BY predicted_digit
-            """)
-            
-            # Commit changes
-            conn.commit()
-            st.sidebar.success("Database tables created successfully!")
-        
-        # Close cursor and connection
-        cursor.close()
-        conn.close()
-        
-        return True
-    except Exception as e:
-        st.sidebar.warning(f"Database setup error: {e}")
-        st.sidebar.info("Running in local mode without database persistence.")
-        return False
-
 def main():
     """Main function to run the Streamlit app"""
     # Set title
@@ -282,12 +73,8 @@ def main():
         success, message = test_db_connection()
         if success:
             st.sidebar.success(f"Connection successful!")
-            # Reset the connection failed flag if it was set
-            if hasattr(st.session_state, 'db_connection_failed'):
-                del st.session_state.db_connection_failed
         else:
             st.sidebar.error(f"Connection failed.")
-            st.session_state.db_connection_failed = True
     
     # Check database setup
     db_available = ensure_database_setup()
@@ -514,7 +301,7 @@ def main():
             with side1:
                 st.subheader("Prediction Statistics")
                 # Display total predictions
-                st.metric("Total Predictions", stats['total_count'])
+                st.metric("Total Predictions", stats['total_predictions'])
                 
                 # Display accuracy statistics if available
                 if stats.get('accuracy_stats'):
@@ -524,13 +311,19 @@ def main():
                     if stats['accuracy_stats'][0] > 0:
                         col1, col2, col3 = st.columns(3)
                         with col1:
-                            st.metric("Correct Predictions", stats['accuracy_stats'][1])
+                            # Convert to int or float to avoid Decimal type errors
+                            correct_pred = int(stats['accuracy_stats'][1]) if isinstance(stats['accuracy_stats'][1], (int, float)) else float(stats['accuracy_stats'][1])
+                            st.metric("Correct Predictions", correct_pred)
                         with col2:
-                            st.metric("Incorrect Predictions", stats['accuracy_stats'][2])
+                            # Convert to int or float to avoid Decimal type errors
+                            incorrect_pred = int(stats['accuracy_stats'][2]) if isinstance(stats['accuracy_stats'][2], (int, float)) else float(stats['accuracy_stats'][2])
+                            st.metric("Incorrect Predictions", incorrect_pred)
                         with col3:
-                            st.metric("Accuracy", f"{stats['accuracy_stats'][3]}%")
-            else:
-                        st.info("No accuracy statistics available yet. Please provide feedback on your predictions.")
+                            # Convert to float and format as string with % symbol
+                            accuracy = float(stats['accuracy_stats'][3]) if stats['accuracy_stats'][3] is not None else 0.0
+                            st.metric("Accuracy", f"{accuracy:.2f}%")
+                else:
+                    st.info("No accuracy statistics available yet. Please provide feedback on your predictions.")
             
             with side2:
                 # Display digit statistics

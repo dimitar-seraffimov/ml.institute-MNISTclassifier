@@ -10,6 +10,7 @@ Example visualisation (can be found in /results folder after each generation):
 # MNIST Digit Classifier
 
 A web application for classifying handwritten digits using a trained neural network model.
+You can access the latest version of the web application on - https://mnist-project-839541782615.europe-west2.run.app/
 
 ## Features
 

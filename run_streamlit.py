@@ -61,15 +61,11 @@ def find_model_file():
         print(f"Using model from model directory: {model_path}")
         return model_path
     
-    print("No model file found. Please train a model first using train_model.py.")
+    print("No model file found. Please train a model first using train.py.")
     return None
 
 def main():
     """Main function to run the Streamlit app"""
-    # Print current working directory for debugging
-    print(f"Current working directory: {os.getcwd()}")
-    print(f"Files in current directory: {os.listdir('.')}")
-    
     # Check dependencies
     check_dependencies()
     
@@ -99,26 +95,29 @@ def main():
 
     print("="*50 + "\n")
     
-    # Get the port from environment variable (for Cloud Run)
+    # Check if running in Cloud Run
+    is_cloud_run = os.environ.get('K_SERVICE') is not None
+    
+    # Get the port from environment variable
     port = int(os.environ.get("PORT", 8080))
     
     print(f"Starting Streamlit on port {port}")
     
-    # Check if streamlit/app.py exists
-    if not os.path.exists("streamlit/app.py"):
-        print(f"ERROR: streamlit/app.py not found. Files in streamlit directory: {os.listdir('streamlit')}")
-        sys.exit(1)
+    # Set Streamlit configuration via environment variables
+    os.environ["STREAMLIT_SERVER_PORT"] = str(port)
+    os.environ["STREAMLIT_SERVER_ADDRESS"] = "0.0.0.0"
+    os.environ["STREAMLIT_SERVER_HEADLESS"] = "true"
     
-    # Run the Streamlit app with the correct host and port
-    # Using --server.address=0.0.0.0 ensures it binds to all network interfaces
-    # Using --server.port ensures it uses the port provided by Cloud Run
-    cmd = [
-        "streamlit", "run", "streamlit/app.py",
-        "--server.address=0.0.0.0",
-        f"--server.port={port}"
-    ]
-    print(f"Running command: {' '.join(cmd)}")
-    subprocess.run(cmd)
+    # Run the Streamlit app
+    try:
+        subprocess.run([
+            "streamlit", "run", "streamlit/app.py",
+            "--server.address=0.0.0.0",
+            f"--server.port={port}"
+        ], check=True)
+    except Exception as e:
+        print(f"Error running Streamlit: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 
