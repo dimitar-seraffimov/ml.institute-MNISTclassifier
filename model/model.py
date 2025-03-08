@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
+import torch
 
 class MNISTClassifier(nn.Module):
     """
@@ -13,46 +14,61 @@ class MNISTClassifier(nn.Module):
     """
     def __init__(self):
         super(MNISTClassifier, self).__init__()
-        # first convolutional layer: 
-        # 1 input channel (grayscale), 10 output channels
-        # kernel size 5x5
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+        # convolutional layer 1
+        # input channel - 1 (grayscale image)
+        # output channel - 32
+        # kernel size - 3
+        # stride - 1
+        self.conv1 = nn.Conv2d(1, 32, 3, 1)
+        # convolutional layer 2
+        # input channel - 32
+        # output channel - 64
+        # kernel size - 3
+        self.conv2 = nn.Conv2d(32, 64, 3, 1)
         
-        # second convolutional layer: 
-        # 10 input channels, 20 output channels
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-       
-        # using standard dropout instead of spatial dropout to avoid dimension warnings
-        # standard dropout works on any input shape
-        self.conv2_drop = nn.Dropout(0.25)
+        self.dropout1 = nn.Dropout(0.25)
+        self.dropout2 = nn.Dropout(0.5)
 
-        # First fully connected layer
-        self.fc1 = nn.Linear(320, 50)
-        
-        
-        # Output layer: 
-        # 50 features, 10 output features (one for each digit)
-        self.fc2 = nn.Linear(50, 10)
+        # fully connected layer 1
+        # formula for calculating the input size of the fully connected layer:
+        # (W - F + P) / S
+        # W = width of the image
+        # F = filter size
+        # P = padding
+        # S = stride
+        # for this case, the formula looks like: (28 - 3 + 2*0) / 1 = 24
+        # the image size is now 24x24 (24/2/2), so after the max pooling layers, the image size is 12x12
+        # that's why we have 64 * 12 * 12
+
+        self.fc1 = nn.Linear(64 * 12 * 12, 128)
+        # fully connected layer 2
+        self.fc2 = nn.Linear(128, 10)
+
 
     def forward(self, x):
-        # First convolutional block: conv -> relu -> max pooling
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        # conv1
+        x = self.conv1(x)
+        x = F.relu(x)
+        # conv2
+        x = self.conv2(x)
+        x = F.relu(x)
 
-        # Second convolutional block:
-        # apply dropout to the output of the second convolutional layer
-        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-
-        # reshape the output of the second convolutional block
-        x = x.view(-1, 320)
+        # max pooling to reduce the size of the image
+        x = F.max_pool2d(x, 2)
+        # dropout to regularize the model
+        x = self.dropout1(x)
+        # flatten the output of the convolutional layers
+        x = torch.flatten(x, 1)
         
-        # first fully connected layer with ReLU activation
-        x = F.relu(self.fc1(x))
+        # fully connected layer 1
+        x = self.fc1(x)
+        x = F.relu(x)
         
-        # dropout for regularisation
-        x = F.dropout(x, training=self.training)
+        # dropout to regularize the model
+        x = self.dropout2(x)
         
-        # Output layer (logits)
+        # fully connected layer 2
         x = self.fc2(x)
-        
-        # return log softmax probabilities
-        return F.log_softmax(x, dim=1) 
+
+        # return the output of the model
+        return x

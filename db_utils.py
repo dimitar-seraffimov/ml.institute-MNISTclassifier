@@ -94,14 +94,14 @@ def ensure_database_setup():
                     COUNT(*) AS total_predictions,
                     COUNT(true_label) AS predictions_with_true_label,
                     SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_predictions,
-                    SUM(CASE WHEN predicted_digit != true_label AND true_label IS NOT NULL THEN 1 ELSE 0 END) AS incorrect_predictions,
+                    COUNT(true_label) - SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS incorrect_predictions,
                     CASE 
                         WHEN COUNT(true_label) > 0 THEN 
                             CAST(SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS NUMERIC) / COUNT(true_label) * 100
                         ELSE 0 
                     END AS accuracy,
                     CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence
-                FROM predictions
+                FROM predictions;
             """)
             
             cursor.execute("""
@@ -111,10 +111,10 @@ def ensure_database_setup():
                     COUNT(*) AS count,
                     CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence,
                     SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_count,
-                    SUM(CASE WHEN predicted_digit != true_label AND true_label IS NOT NULL THEN 1 ELSE 0 END) AS incorrect_count
+                    SUM(CASE WHEN true_label IS NOT NULL THEN 1 ELSE 0 END) - SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS incorrect_count
                 FROM predictions
                 GROUP BY predicted_digit
-                ORDER BY predicted_digit
+                ORDER BY predicted_digit;
             """)
             
             # Commit changes
@@ -130,14 +130,14 @@ def ensure_database_setup():
                     COUNT(*) AS total_predictions,
                     COUNT(true_label) AS predictions_with_true_label,
                     SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_predictions,
-                    SUM(CASE WHEN predicted_digit != true_label AND true_label IS NOT NULL THEN 1 ELSE 0 END) AS incorrect_predictions,
+                    COUNT(true_label) - SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS incorrect_predictions,
                     CASE 
                         WHEN COUNT(true_label) > 0 THEN 
                             CAST(SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS NUMERIC) / COUNT(true_label) * 100
                         ELSE 0 
                     END AS accuracy,
                     CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence
-                FROM predictions
+                FROM predictions;
             """)
             
             cursor.execute("""
@@ -147,10 +147,10 @@ def ensure_database_setup():
                     COUNT(*) AS count,
                     CAST(AVG(confidence) AS NUMERIC(10,4)) AS avg_confidence,
                     SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS correct_count,
-                    SUM(CASE WHEN predicted_digit != true_label AND true_label IS NOT NULL THEN 1 ELSE 0 END) AS incorrect_count
+                    SUM(CASE WHEN true_label IS NOT NULL THEN 1 ELSE 0 END) - SUM(CASE WHEN predicted_digit = true_label THEN 1 ELSE 0 END) AS incorrect_count
                 FROM predictions
                 GROUP BY predicted_digit
-                ORDER BY predicted_digit
+                ORDER BY predicted_digit;
             """)
             
             conn.commit()
@@ -181,6 +181,9 @@ def log_prediction(predicted_digit, confidence, true_label=None, image=None):
             predicted_digit = predicted_digit.item()
         if hasattr(confidence, 'item'):
             confidence = confidence.item()
+        # Ensure confidence is a probability between 0 and 1
+        if confidence > 1.0:
+            confidence = confidence / 100.0 if confidence <= 100.0 else 1.0
         if true_label is not None and hasattr(true_label, 'item'):
             true_label = true_label.item()
         
@@ -250,6 +253,20 @@ def get_statistics():
         if not stats['true_label_count'] or not stats['accuracy_stats']:
             # Default values for: total_predictions, predictions_with_true_label, correct_predictions, incorrect_predictions, accuracy, avg_confidence
             stats['accuracy_stats'] = (stats['total_predictions'], 0, 0, 0, 0.0, 0.0)
+        elif len(stats['accuracy_stats']) < 6:
+            # If accuracy_stats exists but doesn't have all 6 elements, pad it with zeros
+            existing_stats = list(stats['accuracy_stats'])
+            while len(existing_stats) < 6:
+                existing_stats.append(0.0)
+            stats['accuracy_stats'] = tuple(existing_stats)
+        else:
+            # Ensure the values are correct
+            accuracy_stats = list(stats['accuracy_stats'])
+            # Ensure incorrect_predictions is calculated correctly
+            if stats['true_label_count'] > 0:
+                # Recalculate incorrect predictions as total predictions with true labels minus correct predictions
+                accuracy_stats[3] = accuracy_stats[1] - accuracy_stats[2]
+            stats['accuracy_stats'] = tuple(accuracy_stats)
         
         # Get digit-specific statistics
         try:

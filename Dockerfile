@@ -24,7 +24,7 @@ COPY . .
 
 # Train a new model during the build process
 RUN echo "Training a new MNIST model..." && \
-    python run_model.py --mode train --epochs 6 --model-path /app/saved_models/mnist_classifier.pth
+    python run_model.py --mode train --epochs 10 --model-path /app/saved_models/mnist_classifier.pth
 
 # Verify if model file exists (for debugging)
 RUN ls -la /app/saved_models/ || echo "saved_models directory is empty"

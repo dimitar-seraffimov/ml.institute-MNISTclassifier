@@ -12,18 +12,18 @@ def parse_args():
     parser = argparse.ArgumentParser(description='MNIST Classifier Training and Testing')
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'test', 'both'],
                         help='Mode: train, test, or both (default: train)')
-    parser.add_argument('--epochs', type=int, default=5,
-                        help='Number of training epochs (default: 5)')
-    parser.add_argument('--batch-size', type=int, default=100,
-                        help='Batch size for training (default: 100)')
-    parser.add_argument('--learning-rate', type=float, default=0.01,
-                        help='Learning rate (default: 0.01)')
+    parser.add_argument('--epochs', type=int, default=10,
+                        help='Number of training epochs (default: 10)')
+    parser.add_argument('--batch-size', type=int, default=64,
+                        help='Batch size for training (default: 64)')
+    parser.add_argument('--learning-rate', type=float, default=0.001,
+                        help='Learning rate (default: 0.001)')
     parser.add_argument('--model-path', type=str, default='saved_models/mnist_classifier.pth',
                         help='Path to save/load the model (default: saved_models/mnist_classifier.pth)')
     parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='Disable CUDA training')
-    parser.add_argument('--test-samples', type=int, default=5,
-                        help='Number of test samples to visualize (default: 5)')
+    parser.add_argument('--test-samples', type=int, default=8,
+                        help='Number of test samples to visualize (default: 8)')
     return parser.parse_args()
 
 def train(args):
@@ -34,30 +34,31 @@ def train(args):
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     print(f"Using device: {device}")
+
+    # create model and move to device
+    model = MNISTClassifier().to(device)
     
     # define transformations for the MNIST dataset
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))  # MNIST mean and std
     ])
-    
+
     # Load MNIST training dataset
     train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     
     # Load MNIST test dataset
-    test_dataset = datasets.MNIST('./data', train=False, transform=transform)
-    test_loader = DataLoader(test_dataset, batch_size=100, shuffle=True, num_workers=1)
-    
-    # create model and move to device
-    model = MNISTClassifier().to(device)
+    test_dataset = datasets.MNIST('./data', train=False, download=True, transform=transform)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+
     
     # train model
     print("Starting model training...")
     trained_model, history = train_model(
         model, train_loader, test_loader, 
         epochs=args.epochs, 
-        lr=args.learning_rate, 
+        lr=args.learning_rate,
     )
     
     # plot training history
