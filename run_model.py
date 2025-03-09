@@ -6,14 +6,15 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
+import torch.nn as nn
 
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='MNIST Classifier Training and Testing')
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'test', 'both'],
                         help='Mode: train, test, or both (default: train)')
-    parser.add_argument('--epochs', type=int, default=10,
-                        help='Number of training epochs (default: 10)')
+    parser.add_argument('--epochs', type=int, default=20,
+                        help='Number of training epochs (default: 20)')
     parser.add_argument('--batch-size', type=int, default=64,
                         help='Batch size for training (default: 64)')
     parser.add_argument('--learning-rate', type=float, default=0.001,
@@ -38,28 +39,71 @@ def train(args):
     # create model and move to device
     model = MNISTClassifier().to(device)
     
-    # define transformations for the MNIST dataset
-    transform = transforms.Compose([
+    # define transformations for the MNIST dataset with much more aggressive augmentation
+    train_transform = transforms.Compose([
+        transforms.RandomRotation(45),
+        transforms.RandomAffine(
+            degrees=30,  #  rotation up to 30 degrees
+            translate=(0.2, 0.2),  #  translation
+            scale=(0.7, 1.3),  #  scaling variation
+            shear=15  #  shearing
+        ),
+        transforms.ToTensor(),
+        transforms.Normalize((0.1307,), (0.3081,)),  # MNIST mean and std
+        transforms.RandomErasing(p=0.5, scale=(0.02, 0.1))  # randomly erase small parts of the image
+    ])
+
+    # for test use only normalize without augmentation
+    test_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))  # MNIST mean and std
     ])
 
     # Load MNIST training dataset
-    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    
-    # Load MNIST test dataset
-    test_dataset = datasets.MNIST('./data', train=False, download=True, transform=transform)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    train_dataset = datasets.MNIST('./data', train=True, download=True, transform=train_transform)
+
+    # split training data into train and validation sets
+    # use 20% of training data for validation
+    validation_size = int(0.2 * len(train_dataset))
+    train_size = len(train_dataset) - validation_size
+    train_dataset, valid_dataset = torch.utils.data.random_split(train_dataset, [train_size, validation_size])
+
+    # create data loaders
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=2)
+    valid_loader = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
+
+    # load MNIST test dataset - use test_transform without augmentation
+    test_dataset = datasets.MNIST('./data', train=False, download=True, transform=test_transform)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
     
     # train model
     print("Starting model training...")
     trained_model, history = train_model(
-        model, train_loader, test_loader, 
+        model, train_loader, valid_loader,
         epochs=args.epochs, 
         lr=args.learning_rate,
     )
+    
+    # evaluate on the real test set
+    print("Evaluating model on the test set...")
+    trained_model.eval()
+    correct = 0
+    test_loss = 0
+    criterion = nn.CrossEntropyLoss()
+
+    with torch.no_grad():
+        for data, target in test_loader:
+            data = data.to(device)
+            target = target.to(device)
+            output = trained_model(data)
+            test_loss += criterion(output, target).item()
+            pred = output.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum().item()
+
+    test_loss /= len(test_loader)
+    test_accuracy = 100. * correct / len(test_dataset)
+    print(f'Final Test Loss: {test_loss:.4f}, Final Test Accuracy: {test_accuracy:.2f}%')
     
     # plot training history
     plot_training_history(history)
@@ -74,9 +118,8 @@ def train(args):
 def test(args):
     """Test the model on sample images."""
     print(f"Testing MNIST classifier using model from {args.model_path}...")
-    print("Using random sampling (different samples each run)")
     
-    # Load MNIST test dataset with the same transformations used during training
+    # load MNIST test dataset with the same transformations used during training
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))  # MNIST mean and std
@@ -100,9 +143,18 @@ def test(args):
         # get image and label
         image, label = test_dataset[idx]
         
-        # make prediction - pass the tensor directly to the predictor
-        # the predictor will handle the preprocessing
-        result = predictor.predict(image)
+        # convert PyTorch tensor to PIL Image before prediction
+        # denormalize the tensor
+        inv_normalize = transforms.Compose([
+            transforms.Normalize(mean=[-0.1307/0.3081], std=[1/0.3081])
+        ])
+        denormalized_image = inv_normalize(image)
+        
+        # convert to PIL Image
+        pil_image = transforms.ToPILImage()(denormalized_image)
+        
+        # make prediction using the PIL Image
+        result = predictor.predict(pil_image)
         
         # display image (convert to numpy for matplotlib)
         # ensure we're displaying a 2D image without channel dimension
@@ -110,8 +162,8 @@ def test(args):
         axes[i].imshow(img_display, cmap='gray')
         
         # set title with prediction and ground truth
-        pred_digit = result['predicted_digit']
-        confidence = result['confidence']
+        # unpack the tuple returned by predict method
+        pred_digit, confidence, _ = result
         axes[i].set_title(f"Predicted: {pred_digit} ({confidence:.3f})\nTrue: {label}")
         axes[i].axis('off')
     

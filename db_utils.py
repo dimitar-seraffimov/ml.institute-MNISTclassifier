@@ -5,40 +5,30 @@ Handles connections to PostgreSQL, including Cloud SQL.
 import os
 import psycopg2
 import streamlit as st
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 def get_db_params():
     """Get database connection parameters with Cloud SQL support"""
-    # Database connection parameters
+    # Get database connection parameters from environment variables
     db_params = {
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'port': os.getenv('DB_PORT', '5432'),
-        'database': os.getenv('DB_NAME', 'mnist_db'),
-        'user': os.getenv('DB_USER', 'postgres'),
-        'password': os.getenv('DB_PASSWORD', 'postgres')
+        'host': os.getenv('DB_HOST'),
+        'port': os.getenv('DB_PORT'),
+        'database': os.getenv('DB_NAME'),
+        'user': os.getenv('DB_USER'),
+        'password': os.getenv('DB_PASSWORD')
     }
     
-    # Check if we're running on Google Cloud Run
+    # Check if running on Google Cloud Run
     running_in_cloud_run = os.environ.get('K_SERVICE') is not None
     
-    # If we're running on Cloud Run, and a Cloud SQL instance connection name is provided,
+    # If running on Cloud Run, and a Cloud SQL instance connection name is provided,
     # use the Cloud SQL Proxy unix socket to connect
-    db_instance_connection_name = os.getenv('DB_INSTANCE_CONNECTION_NAME', '')
+    db_instance_connection_name = os.getenv('DB_INSTANCE_CONNECTION_NAME')
     if running_in_cloud_run and db_instance_connection_name:
         db_params['host'] = f"/cloudsql/{db_instance_connection_name}"
-    
-    # Support for DATABASE_URL format (used by many cloud providers)
-    database_url = os.getenv('DATABASE_URL', '')
-    if database_url:
-        # Parse DATABASE_URL and override db_params
-        try:
-            # Format: postgres://username:password@hostname:port/database
-            import re
-            pattern = r'postgres://(?P<user>[^:]+):(?P<password>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)/(?P<database>.+)'
-            match = re.match(pattern, database_url)
-            if match:
-                db_params = match.groupdict()
-        except Exception as e:
-            print(f"Failed to parse DATABASE_URL: {e}")
     
     return db_params
 
@@ -54,15 +44,13 @@ def connect_to_database():
 def ensure_database_setup():
     """Ensure database is set up correctly"""
     try:
-        # Connect to database
         conn = connect_to_database()
         if not conn:
             print("Could not connect to database.")
             return False
             
         cursor = conn.cursor()
-        
-        # Check if predictions table exists
+        # check if predictions table exists
         cursor.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -70,12 +58,12 @@ def ensure_database_setup():
             )
         """)
         table_exists = cursor.fetchone()[0]
-        
-        # Create tables if they don't exist
+
+        # create tables if they don't exist
         if not table_exists:
             print("Creating database tables...")
             
-            # Create predictions table
+            # create predictions table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS predictions (
                     id SERIAL PRIMARY KEY,
@@ -87,7 +75,7 @@ def ensure_database_setup():
                 )
             """)
             
-            # Create views for statistics
+            # create views for statistics
             cursor.execute("""
                 CREATE OR REPLACE VIEW accuracy_stats AS
                 SELECT 
@@ -117,11 +105,11 @@ def ensure_database_setup():
                 ORDER BY predicted_digit;
             """)
             
-            # Commit changes
+            # commit changes
             conn.commit()
             print("Database tables created successfully!")
         else:
-            # Update views to ensure they have the correct logic
+            # update views to ensure they have the correct logic
             print("Updating database views...")
             
             cursor.execute("""
@@ -156,7 +144,7 @@ def ensure_database_setup():
             conn.commit()
             print("Database views updated successfully!")
         
-        # Close cursor and connection
+        # close cursor and connection
         cursor.close()
         conn.close()
         
@@ -168,7 +156,7 @@ def ensure_database_setup():
 def log_prediction(predicted_digit, confidence, true_label=None, image=None):
     """Log prediction to PostgreSQL database"""
     try:
-        # Convert image to binary data if provided
+        # convert image to binary data if provided
         image_data = None
         if image is not None:
             import io
@@ -176,40 +164,39 @@ def log_prediction(predicted_digit, confidence, true_label=None, image=None):
             image.save(img_byte_arr, format='PNG')
             image_data = img_byte_arr.getvalue()
         
-        # Convert numpy types to Python native types
+        # convert numpy types to Python native types
         if hasattr(predicted_digit, 'item'):
             predicted_digit = predicted_digit.item()
         if hasattr(confidence, 'item'):
             confidence = confidence.item()
-        # Ensure confidence is a probability between 0 and 1
+        # ensure confidence is a probability between 0 and 1
         if confidence > 1.0:
             confidence = confidence / 100.0 if confidence <= 100.0 else 1.0
         if true_label is not None and hasattr(true_label, 'item'):
             true_label = true_label.item()
         
-        # Connect to database
         conn = connect_to_database()
         if not conn:
             return False
             
         cursor = conn.cursor()
         
-        # Insert prediction into database
+        # insert prediction into database
         cursor.execute("""
             INSERT INTO predictions (timestamp, predicted_digit, confidence, true_label, image_data)
             VALUES (NOW(), %s, %s, %s, %s)
         """, (predicted_digit, confidence, true_label, image_data))
         
-        # Commit changes
+        # commit changes
         conn.commit()
         
-        # Close cursor and connection
+        # close cursor and connection
         cursor.close()
         conn.close()
         
         return True
     except Exception as e:
-        # Log error but don't crash the application
+        # log error but don't crash the application
         print(f"Error logging prediction to database: {e}")
         return False
 
@@ -223,20 +210,20 @@ def get_statistics():
         cursor = conn.cursor()
         stats = {}
         
-        # Get total predictions
+        # get total predictions
         cursor.execute("SELECT COUNT(*) FROM predictions")
         stats['total_predictions'] = cursor.fetchone()[0]
         
-        # Get count of predictions with true labels
+        # get count of predictions with true labels
         cursor.execute("SELECT COUNT(*) FROM predictions WHERE true_label IS NOT NULL")
         stats['true_label_count'] = cursor.fetchone()[0]
         
-        # Get accuracy statistics
+        # get accuracy statistics
         try:
             cursor.execute("SELECT * FROM accuracy_stats")
             raw_stats = cursor.fetchone()
             
-            # Convert Decimal values to Python native types
+            # convert Decimal values to Python native types
             if raw_stats:
                 stats['accuracy_stats'] = tuple(
                     float(val) if isinstance(val, (float, int)) or hasattr(val, 'as_integer_ratio') else val 
@@ -245,62 +232,62 @@ def get_statistics():
             else:
                 stats['accuracy_stats'] = None
         except Exception as e:
-            # If the view doesn't exist yet, set to None
+            # if the view doesn't exist yet, set to None
             print(f"Error getting accuracy stats: {e}")
             stats['accuracy_stats'] = None
         
-        # If no true labels, set default values
+        # if no true labels, set default values
         if not stats['true_label_count'] or not stats['accuracy_stats']:
-            # Default values for: total_predictions, predictions_with_true_label, correct_predictions, incorrect_predictions, accuracy, avg_confidence
+            # default values for: total_predictions, predictions_with_true_label, correct_predictions, incorrect_predictions, accuracy, avg_confidence
             stats['accuracy_stats'] = (stats['total_predictions'], 0, 0, 0, 0.0, 0.0)
         elif len(stats['accuracy_stats']) < 6:
-            # If accuracy_stats exists but doesn't have all 6 elements, pad it with zeros
+            # if accuracy_stats exists but doesn't have all 6 elements, pad it with zeros
             existing_stats = list(stats['accuracy_stats'])
             while len(existing_stats) < 6:
                 existing_stats.append(0.0)
             stats['accuracy_stats'] = tuple(existing_stats)
         else:
-            # Ensure the values are correct
+            # ensure the values are correct
             accuracy_stats = list(stats['accuracy_stats'])
-            # Ensure incorrect_predictions is calculated correctly
+            # ensure incorrect_predictions is calculated correctly
             if stats['true_label_count'] > 0:
-                # Recalculate incorrect predictions as total predictions with true labels minus correct predictions
+                # recalculate incorrect predictions as total predictions with true labels minus correct predictions
                 accuracy_stats[3] = accuracy_stats[1] - accuracy_stats[2]
             stats['accuracy_stats'] = tuple(accuracy_stats)
         
-        # Get digit-specific statistics
+        # get digit-specific statistics
         try:
             cursor.execute("SELECT * FROM digit_stats")
             raw_digit_stats = cursor.fetchall()
             
-            # Convert Decimal values to Python native types
+            # convert Decimal values to Python native types
             stats['digit_stats'] = [
                 tuple(float(val) if isinstance(val, (float, int)) or hasattr(val, 'as_integer_ratio') else val 
                       for val in row)
                 for row in raw_digit_stats
             ]
         except Exception as e:
-            # If the view doesn't exist yet, set to empty list
+            # if the view doesn't exist yet, set to empty list
             print(f"Error getting digit stats: {e}")
             stats['digit_stats'] = []
         
-        # Get recent predictions
+        # get recent predictions
         cursor.execute("""
-            SELECT id, predicted_digit, confidence, true_label 
+            SELECT timestamp, predicted_digit, confidence, true_label 
             FROM predictions 
             ORDER BY timestamp DESC 
-            LIMIT 5
+            LIMIT 40
         """)
         raw_recent = cursor.fetchall()
         
-        # Convert Decimal values to Python native types
+        # convert Decimal values to Python native types
         stats['recent_predictions'] = [
             tuple(float(val) if isinstance(val, (float, int)) or hasattr(val, 'as_integer_ratio') else val 
                   for val in row)
             for row in raw_recent
         ]
         
-        # Close cursor and connection
+        # close cursor and connection
         cursor.close()
         conn.close()
         

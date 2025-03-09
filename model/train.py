@@ -21,15 +21,14 @@ def train_model(model, train_loader, test_loader, epochs, lr):
         Trained model and training history
     """
 
-    # Get the device from the model
+    # get the device from the model
     device = next(model.parameters()).device
     print(f"--- train_model function in train.py using device from model: {device}")
 
     # define loss function and optimiser with weight decay
     criterion = nn.CrossEntropyLoss()
-    optimiser = torch.optim.Adam(model.parameters(), lr=lr)
+    optimiser = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-3)
 
-   
     # training history
     train_losses = []
     test_losses = []
@@ -39,7 +38,7 @@ def train_model(model, train_loader, test_loader, epochs, lr):
 
     # training loop for each epoch
     for epoch in range(1, epochs + 1):
-        # put the model in training mode
+        model.train()
         train_loss = 0
 
         for batch_idx, (data, target) in enumerate(train_loader):
@@ -69,8 +68,10 @@ def train_model(model, train_loader, test_loader, epochs, lr):
         train_loss /= len(train_loader)
         train_losses.append(train_loss)
 
-        print(f'--- Evaluation phase for the epoch: {epoch}...')
+        print(f'--- Evaluation phase for epoch: {epoch} ---')
 
+        # Set model to evaluation mode for testing
+        model.eval()
         correct = 0
         test_loss = 0
 
@@ -87,19 +88,25 @@ def train_model(model, train_loader, test_loader, epochs, lr):
                 # count correct predictions
                 correct += pred.eq(target.view_as(pred)).sum().item()
             
-            # calculate accuracy
-            accuracy = 100. * correct  / len(test_loader.dataset)
-            test_accuracies.append(accuracy)
+        # calculate accuracy
+        accuracy = 100. * correct  / len(test_loader.dataset)
+        test_accuracies.append(accuracy)
+        
+        # average test loss for this epoch
+        test_loss /= len(test_loader)
+        test_losses.append(test_loss)
 
+        print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Test Loss: {test_loss:.4f}, '
+              f'Test Accuracy: {accuracy:.2f}%')
 
-            print(f'Calculated Train Loss for the epoch: {train_loss:.2f}\n'
-                    f'Calculated Test Loss for the epoch: {test_loss:.2f}\n'
-                    f'Calculated Test Accuracy for the epoch: {accuracy:.2f}%')
-
-    # return the trained model and the training history data
-    return model, {'train_losses': train_losses, 
-                  'test_losses': test_losses, 
-                  'test_accuracies': test_accuracies}
+    # return the model and training history
+    history = {
+        'train_losses': train_losses,
+        'test_losses': test_losses,
+        'test_accuracies': test_accuracies
+    }
+    
+    return model, history
 
 # generate and save a training history plot to the model/plots directory
 def plot_training_history(history):

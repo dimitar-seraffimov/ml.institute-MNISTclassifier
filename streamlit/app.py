@@ -210,6 +210,7 @@ def main():
                 log_success = log_prediction(predicted_digit, confidence, true_label, image)
                 if log_success:
                     st.success(f"Prediction logged with true label: {true_label}")
+                    st.info("To learn more about the overall model performance, check out the statistics tab.")
                 else:
                     st.error("Could not log to database. Please check your connection.")
                 
@@ -296,9 +297,9 @@ def main():
                                 accuracy = float(stats['accuracy_stats'][4]) if stats['accuracy_stats'][4] is not None else 0.0
                             else:
                                 accuracy = 0.0
-                            st.metric("Accuracy", f"{accuracy:.2f}%")
+                            st.metric("Overall Model Accuracy", f"{accuracy:.2f}%")
                 else:
-                    st.info("No accuracy statistics available yet. Please provide feedback on your predictions.")
+                    st.info("No accuracy statistics available yet.")
             
             with side2:
                 # display digit statistics
@@ -385,7 +386,7 @@ def main():
                     )
                     # create the bar chart with the full width
                     st.markdown('<div class="digit-distribution-chart">', unsafe_allow_html=True)
-                    st.bar_chart({str(digit): count for digit, count, _ in stats['digit_stats']})
+                    st.bar_chart({str(row[0]): row[1] for row in stats['digit_stats']})
         else:
             st.info("No statistics available. Make some predictions first or check database connection.")
 
